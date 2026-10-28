@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Domain codes are strings intentionally: the application layer will validate
+// state transitions and expose typed enums, while SQLite stays easy to run.
+model Employee {
+  id                 String         @id @default(uuid())
+  name               String
+  email              String         @unique
+  department         String?
+  role               String         @default("EMPLOYEE") // EMPLOYEE | ANALYST_N1 | ANALYST_N2
+  active             Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  conversations      Conversation[] @relation("ConversationOwner")
+  assignedConversations Conversation[] @relation("AssignedAnalyst")
+  openedTickets      Ticket[]       @relation("TicketOwner")
+  affectedTickets    Ticket[]       @relation("TicketAffected")
+  sentMessages       Message[]
+  assignedHandoffs   Handoff[]      @relation("HandoffAnalyst")
+  ticketEvents       TicketEvent[]
+}
+
+model Conversation {
+  id                  String          @id @default(uuid())
+  employeeId          String
+  employee            Employee        @relation("ConversationOwner", fields: [employeeId], references: [id])
+  assignedAnalystId   String?
+  assignedAnalyst     Employee?       @relation("AssignedAnalyst", fields: [assignedAnalystId], references: [id])
+  state               String          @default("AGENT") // AGENT | WAITING_ANALYST | ANALYST | CLOSED
+  title               String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  closedAt            DateTime?
+  sessions            ChatSession[]
+  messages            Message[]
+  decisions           AgentDecision[]
+  drafts              TicketDraft[]
+  handoffs            Handoff[]
+  tickets             Ticket[]
+  @@index([employeeId, state])
+  @@index([state, updatedAt])
+}
+
+model ChatSession {
+  id               String       @id @default(uuid())
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  messageCount     Int          @default(0) // user messages counted at service layer; maximum 30
+  startedAt        DateTime     @default(now())
+  endedAt          DateTime?
+  messages         Message[]
+  @@index([conversationId, startedAt])
+}
+
+model Message {
+  id               String         @id @default(uuid())
+  conversationId   String
+  conversation     Conversation   @relation(fields: [conversationId], references: [id])
+  sessionId        String?
+  session          ChatSession?   @relation(fields: [sessionId], references: [id])
+  senderType       String         // EMPLOYEE | AGENT | ANALYST | SYSTEM
+  senderId         String?
+  sender           Employee?      @relation(fields: [senderId], references: [id])
+  content          String
+  contentType      String         @default("TEXT") // TEXT | TICKET_CARD | DRAFT | QUICK_OPTIONS
+  structuredData   String?        // JSON serialized for SQLite
+  createdAt        DateTime       @default(now())
+  decisions        AgentDecision[]
+  @@index([conversationId, createdAt])
+}
+
+model AgentDecision {
+  id               String       @id @default(uuid())
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  messageId        String?
+  message          Message?     @relation(fields: [messageId], references: [id])
+  intent           String
+  action           String
+  confidence       Float?
+  reasoning        String       // human-readable explanation of the choice
+  toolName         String?
+  toolInput        String?      // redacted JSON; never store credentials
+  toolOutput       String?      // sanitized JSON; avoid other employees' data
+  outcome          String       @default("PENDING") // PENDING | SUCCESS | FAILED | SKIPPED
+  createdAt        DateTime     @default(now())
+  @@index([conversationId, createdAt])
+}
+
+model KnowledgeArticle {
+  id               String       @id @default(uuid())
+  title            String
+  slug             String       @unique
+  category         String       // ACESSO | REDE_VPN | HARDWARE | SOFTWARE | EMAIL | OUTROS
+  body             String
+  platform         String?
+  tags             String?      // JSON serialized for SQLite
+  published        Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  @@index([category, published])
+}
+
+model Ticket {
+  id               String       @id @default(uuid())
+  reference        String       @unique // INC-xxxxx or REQ-xxxxx
+  ownerId          String
+  owner            Employee     @relation("TicketOwner", fields: [ownerId], references: [id])
+  affectedId       String?
+  affected         Employee?    @relation("TicketAffected", fields: [affectedId], references: [id])
+  conversationId   String?
+  conversation     Conversation? @relation(fields: [conversationId], references: [id])
+  title            String
+  description      String
+  type             String       // INC | REQ
+  category         String       // ACESSO | REDE_VPN | HARDWARE | SOFTWARE | EMAIL | OUTROS
+  priority         String       // CRITICAL | HIGH | MEDIUM | LOW
+  status           String       @default("OPEN")
+  affectedScope    String       // SELF | TEAM | COMPANY | UNKNOWN
+  dueAt            DateTime?
+  lastUpdatedAt    DateTime     @default(now())
+  resolvedAt       DateTime?
+  reopenedAt       DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  events           TicketEvent[]
+  drafts           TicketDraft[]
+  handoffs         Handoff[]
+  @@index([ownerId, status])
+  @@index([category, status])
+  @@index([dueAt])
+}
+
+model TicketDraft {
+  id               String       @id @default(uuid())
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  existingTicketId String?
+  existingTicket   Ticket?      @relation(fields: [existingTicketId], references: [id])
+  operation        String       @default("CREATE") // CREATE | UPDATE | REOPEN
+  title            String
+  description      String
+  type             String
+  category         String
+  priority         String
+  affectedScope    String
+  affectedId       String?
+  state            String       @default("PENDING") // PENDING | CONFIRMED | CANCELLED | EXPIRED
+  confirmedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  @@index([conversationId, state])
+}
+
+model TicketEvent {
+  id               String       @id @default(uuid())
+  ticketId         String
+  ticket           Ticket       @relation(fields: [ticketId], references: [id])
+  actorId          String?
+  actor            Employee?    @relation(fields: [actorId], references: [id])
+  eventType        String       // CREATED | UPDATED | REOPENED | STATUS_CHANGED | TRANSFERRED
+  details          String?      // JSON with sensitive fields redacted
+  createdAt        DateTime     @default(now())
+  @@index([ticketId, createdAt])
+}
+
+model Handoff {
+  id               String       @id @default(uuid())
+  conversationId   String
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  ticketId         String?
+  ticket           Ticket?      @relation(fields: [ticketId], references: [id])
+  analystId        String?
+  analyst          Employee?    @relation("HandoffAnalyst", fields: [analystId], references: [id])
+  reason           String       // USER_REQUEST | CRITICAL | OVERDUE | LOW_CONFIDENCE
+  summary          String
+  supportLevel     String?      // N1 | N2
+  state            String       @default("WAITING") // WAITING | ASSUMED | RETURNED | CLOSED
+  requestedAt      DateTime     @default(now())
+  assumedAt        DateTime?
+  finishedAt       DateTime?
+  @@index([state, requestedAt])
+  @@index([conversationId])
+}
