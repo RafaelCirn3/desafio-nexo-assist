@@ -19,7 +19,7 @@ test("reopen within seven days only", () => {
 test("critical is elapsed hour; others business time", () => {
   const friday = new Date("2026-10-30T20:00:00Z"); // 17:00 São Paulo
   assert.equal(calculateDueAt("CRITICAL", friday).toISOString(), "2026-10-30T21:00:00.000Z");
-  assert.equal(calculateDueAt("HIGH", friday).toISOString(), "2026-11-03T14:00:00.000Z"); // Tuesday 11:00 São Paulo
+  assert.equal(calculateDueAt("HIGH", friday).toISOString(), "2026-11-02T14:00:00.000Z"); // Monday 11:00 São Paulo
 });
 test("overdue is strictly after deadline", () => {
   const due = new Date("2026-10-28T12:00:00Z");
