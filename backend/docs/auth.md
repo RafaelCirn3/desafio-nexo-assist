@@ -11,3 +11,5 @@ The PRD requires corporate-email login with any password for fixture employees. 
 - For production implement proper identity provider / credential verification, refresh/revocation and request rate limiting.
 
 Example: `npm run db:seed`, login with `ana.martins@nexo.example` and any non-empty password after enabling demo auth.
+
+The backend loads `backend/.env` through dotenv when started from the `backend/` directory. Before tests or server startup, copy `.env.example` and replace AUTH_SECRET with a freshly generated value. Test execution requires that environment file.
